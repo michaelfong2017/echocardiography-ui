@@ -13,6 +13,9 @@
 #endif
 #include <GLFW/glfw3.h> // Will drag system OpenGL headers
 
+#include <iostream>
+#include <filesystem>
+
 // [Win32] Our example includes a copy of glfw3.lib pre-compiled with VS2010 to maximize ease of testing and compatibility with old VS compilers.
 // To link with VS2010-era libraries, VS2015+ requires linking with legacy_stdio_definitions.lib, which we do using this pragma.
 // Your own project should not be affected, as you are likely to link with a newer binary of GLFW that is adequate for your version of Visual Studio.
@@ -157,7 +160,12 @@ int main(int, char**)
             ImGui::ColorEdit3("clear color", (float*)&clear_color); // Edit 3 floats representing a color
 
             if (ImGui::Button("Button"))                            // Buttons return true when clicked (most widgets return true when edited/activated)
+            {
                 counter++;
+                std::cout << "Current path is " << std::filesystem::current_path() << std::endl; // (1)
+                std::system("chmod +x /home/michael/echocardiography-ui/packages/DICOMTestExe/DICOMTestExe");
+                std::system("/home/michael/echocardiography-ui/packages/DICOMTestExe/DICOMTestExe /home/michael/echocardiography-ui/packages/DICOMTestExe/data/dcm/PWHOR190734217S_12Oct2021_CX03WQDU_3DQ.dcm A2C");
+            }
             ImGui::SameLine();
             ImGui::Text("counter = %d", counter);
 

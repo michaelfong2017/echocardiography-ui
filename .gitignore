@@ -4,3 +4,4 @@
 *.app
 imgui.ini
 projects/example_glfw_opengl3/build/
+packages/DICOMTestExe/
