@@ -2,3 +2,9 @@
 	path = packages/imgui
 	url = https://github.com/michaelfong2017/imgui.git
 	branch = docking
+
+
+[submodule "packages/glfw"]
+	path = packages/glfw
+	url = https://github.com/michaelfong2017/glfw.git
+	branch = master
