@@ -186,8 +186,8 @@ int main(int, char **)
                 std::cout << "Selected filename is " << fileDialog.GetSelected().string() << std::endl;
 
                 std::cout << "Current path is " << std::filesystem::current_path() << std::endl; // (1)
-                std::system("chmod +x /home/michael/echocardiography-ui/packages/DICOMTestExe/DICOMTestExe");
-                std::string command = "yes | /home/michael/echocardiography-ui/packages/DICOMTestExe/DICOMTestExe " + fileDialog.GetSelected().string() + " A2C";
+                std::system("chmod +x /echocardiography-ui/packages/DICOMTestExe/DICOMTestExe");
+                std::string command = "yes | /echocardiography-ui/packages/DICOMTestExe/DICOMTestExe " + fileDialog.GetSelected().string() + " A2C";
                 std::system(command.c_str());
 
                 fileDialog.ClearSelected();
