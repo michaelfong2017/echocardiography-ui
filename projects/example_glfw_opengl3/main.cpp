@@ -24,7 +24,8 @@
 
 #include <opencv2/opencv.hpp>
 
-extern "C" {
+extern "C"
+{
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libavutil/imgutils.h>
@@ -50,44 +51,22 @@ static void glfw_error_callback(int error, const char *description)
     fprintf(stderr, "GLFW Error %d: %s\n", error, description);
 }
 
-bool decodeThirdFrame(const std::string& inputFilename, AVFrame*& outputFrame) {
-    // Initialize FFmpeg
-    av_register_all();
-
-    // Open the input file
-    AVFormatContext* formatContext = nullptr;
-    if (avformat_open_input(&formatContext, inputFilename.c_str(), nullptr, nullptr) != 0) {
-        std::cerr << "Could not open input file.\n";
-        return false;
-    }
-
-    // Find the first video stream
-    int videoStreamIndex = -1;
-    for (unsigned int i = 0; i < formatContext->nb_streams; ++i) {
-        if (formatContext->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
-            videoStreamIndex = i;
-            break;
-        }
-    }
-
-    if (videoStreamIndex == -1) {
-        std::cerr << "No video stream found.\n";
-        return false;
-    }
-
+bool decodeFrame(AVFormatContext *formatContext, int videoStreamIndex, AVFrame *&outputFrame, int targetFrameCount)
+{
     // Get the codec and codec context
-    AVCodecParameters* codecParameters = formatContext->streams[videoStreamIndex]->codecpar;
-    AVCodec* codec = avcodec_find_decoder(codecParameters->codec_id);
-    AVCodecContext* codecContext = avcodec_alloc_context3(codec);
+    AVCodecParameters *codecParameters = formatContext->streams[videoStreamIndex]->codecpar;
+    AVCodec *codec = avcodec_find_decoder(codecParameters->codec_id);
+    AVCodecContext *codecContext = avcodec_alloc_context3(codec);
     avcodec_parameters_to_context(codecContext, codecParameters);
 
     // Open the codec
-    if (avcodec_open2(codecContext, codec, nullptr) < 0) {
+    if (avcodec_open2(codecContext, codec, nullptr) < 0)
+    {
         std::cerr << "Could not open codec.\n";
         return false;
     }
 
-    AVFrame* frame = av_frame_alloc();
+    AVFrame *frame = av_frame_alloc();
     AVPacket packet;
     int frameCount = 0;
 
@@ -97,53 +76,56 @@ bool decodeThirdFrame(const std::string& inputFilename, AVFrame*& outputFrame) {
     //             NULL, NULL);
 
     // Read the frames
-    while (av_read_frame(formatContext, &packet) >= 0) {
-        if (packet.stream_index == videoStreamIndex) {
+    while (av_read_frame(formatContext, &packet) >= 0)
+    {
+        if (packet.stream_index == videoStreamIndex)
+        {
             // Decode the video frame
-            if (avcodec_send_packet(codecContext, &packet) < 0) {
+            if (avcodec_send_packet(codecContext, &packet) < 0)
+            {
                 std::cerr << "Error sending packet for decoding.\n";
                 return false;
             }
 
             int ret = avcodec_receive_frame(codecContext, frame);
-            if (ret == 0) {
-                frameCount++;
-
+            if (ret == 0)
+            {
                 // Stop decoding when the third frame is found
-                if (frameCount == 3) {
+                if (frameCount++ == targetFrameCount)
+                {
                     // outputFrame = frame;
 
                     // Convert ffmpeg frame timestamp to real frame number.
-					// int64_t numberFrame = (double)((int64_t)pts - 
-					// 	pFormatCtx->streams[videoStreamIndex]->start_time) * 
-					// 	videoBaseTime * videoFramePerSecond; 
+                    // int64_t numberFrame = (double)((int64_t)pts -
+                    // 	pFormatCtx->streams[videoStreamIndex]->start_time) *
+                    // 	videoBaseTime * videoFramePerSecond;
 
-					// Get RGBA Frame
-                    AVFrame * rgbaFrame = NULL;
-                    int width  = codecContext->width;
+                    // Get RGBA Frame
+                    AVFrame *rgbaFrame = NULL;
+                    int width = codecContext->width;
                     int height = codecContext->height;
                     int bufferImgSize = avpicture_get_size(AV_PIX_FMT_BGR24, width, height);
                     rgbaFrame = av_frame_alloc();
-                    uint8_t * buffer = (uint8_t*)av_mallocz(bufferImgSize);
+                    uint8_t *buffer = (uint8_t *)av_mallocz(bufferImgSize);
                     if (rgbaFrame)
                     {
-                        avpicture_fill((AVPicture*)rgbaFrame, buffer, AV_PIX_FMT_BGR24, width, height);
-                        rgbaFrame->width  = width;
+                        avpicture_fill((AVPicture *)rgbaFrame, buffer, AV_PIX_FMT_BGR24, width, height);
+                        rgbaFrame->width = width;
                         rgbaFrame->height = height;
-                        //rgbaFrame->data[0] = buffer;
+                        // rgbaFrame->data[0] = buffer;
 
-                        SwsContext * pImgConvertCtx = sws_getContext(codecContext->width, codecContext->height,
-                            codecContext->pix_fmt,
-                            codecContext->width, codecContext->height,
-                            AV_PIX_FMT_BGR24,
-                            SWS_BICUBIC, NULL, NULL, NULL);
+                        SwsContext *pImgConvertCtx = sws_getContext(codecContext->width, codecContext->height,
+                                                                    codecContext->pix_fmt,
+                                                                    codecContext->width, codecContext->height,
+                                                                    AV_PIX_FMT_BGR24,
+                                                                    SWS_BICUBIC, NULL, NULL, NULL);
 
                         sws_scale(pImgConvertCtx, frame->data, frame->linesize,
-                            0, height, rgbaFrame->data, rgbaFrame->linesize);      
-                    }  
+                                  0, height, rgbaFrame->data, rgbaFrame->linesize);
+                    }
 
                     outputFrame = (AVFrame *)rgbaFrame;
-					break;
+                    break;
                 }
             }
         }
@@ -155,10 +137,11 @@ bool decodeThirdFrame(const std::string& inputFilename, AVFrame*& outputFrame) {
     avcodec_free_context(&codecContext);
     avformat_close_input(&formatContext);
 
-    return frameCount == 3;
+    return frameCount == targetFrameCount + 1;
 }
 
-GLuint createTextureFromFrame(AVFrame* frame) {
+GLuint createTextureFromFrame(AVFrame *frame)
+{
     GLuint textureId;
     glGenTextures(1, &textureId);
     glBindTexture(GL_TEXTURE_2D, textureId);
@@ -169,16 +152,15 @@ GLuint createTextureFromFrame(AVFrame* frame) {
     // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     // // glPixelStorei(GL_UNPACK_ALIGNMENT, 2);
 
-
     // GLenum format = frame->format == AV_PIX_FMT_RGB24 ? GL_RGB : GL_RGBA;
     // glTexImage2D(GL_TEXTURE_2D, 0, format, frame->width, frame->height, 0, format, GL_UNSIGNED_BYTE, frame->data[0]);
 
-            // Set texture parameters
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    // Set texture parameters
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
-            // Upload the frame data to the texture object
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, frame->width, frame->height, 0, GL_RGB, GL_UNSIGNED_BYTE, frame->data[0]);
+    // Upload the frame data to the texture object
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, frame->width, frame->height, 0, GL_RGB, GL_UNSIGNED_BYTE, frame->data[0]);
 
     return textureId;
 }
@@ -275,15 +257,9 @@ int main(int, char **)
     fileDialog.SetTitle("Select the .dcm file to be converted");
     fileDialog.SetTypeFilters({".dcm"});
 
-    // ... Initialize OpenGL context ...
-    AVFrame* thirdFrame = nullptr;
-    if (!decodeThirdFrame("/echocardiography-ui/packages/DICOMTestExe/data/dcm/dicomresults/A2C/mp4s/PWHOR190734217S_12Oct2021_CX03WQDU_3DQ.mp4", thirdFrame)) {
-        std::cerr << "Could not decode the third frame.\n";
-        return -1;
-    }
-
-    GLuint textureId = createTextureFromFrame(thirdFrame);
-    av_frame_free(&thirdFrame);
+    // Display mp4
+    bool showVideo = false;
+    double currentIoFrameNumber = 0;
 
     // Main loop
 #ifdef __EMSCRIPTEN__
@@ -345,6 +321,8 @@ int main(int, char **)
                 system(command.c_str());
 
                 fileDialog.ClearSelected();
+
+                showVideo = true;
             }
 
             ImGui::SameLine();
@@ -364,63 +342,70 @@ int main(int, char **)
             ImGui::End();
         }
 
-        ImGui::Begin("Video Player");
-        ImVec2 window_size = ImGui::GetWindowSize();
-        ImGui::Image((void*)(intptr_t)textureId, window_size);
-        ImGui::End();
-        // Get the next frame from the video file
-        // int frame_num = cap.get(cv::CAP_PROP_FRAME_COUNT);
-	    // // cout << "total frame number is: " << frame_num << endl;
+        if (showVideo)
+        {
+            // Read mp4 file
+            // Initialize FFmpeg
+            av_register_all();
 
-        // // Display the frame using OpenGL
-        // ImGui::Begin("Video Player");
-        // if (frame_counter++ % 1 == 0) {
-        //     // cap >> frame;
-        //     // image = cvMat2TexInput(frame);
+            // Open the input file
+            AVFormatContext *formatContext = nullptr;
+            std::string inputFilename = "/echocardiography-ui/packages/DICOMTestExe/data/dcm/dicomresults/A2C/mp4s/PWHOR190734217S_12Oct2021_CX03WQDU_3DQ.mp4";
+            if (avformat_open_input(&formatContext, inputFilename.c_str(), nullptr, nullptr) != 0)
+            {
+                std::cerr << "Could not open input file.\n";
+                return false;
+            }
 
-        //     //     // Display the frame
-        //     // cv::imshow("Video", frame);
+            // Find the first video stream
+            int videoStreamIndex = -1;
+            for (unsigned int i = 0; i < formatContext->nb_streams; ++i)
+            {
+                if (formatContext->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO)
+                {
+                    videoStreamIndex = i;
+                    break;
+                }
+            }
 
-        //     // // Wait for a key press (or 30 milliseconds)
-        //     // if (cv::waitKey(30) >= 0) {
-        //     //     break;
-        //     // }
+            if (videoStreamIndex == -1)
+            {
+                std::cerr << "No video stream found.\n";
+                return false;
+            }
 
-        //     // Read a frame from the video
-        //     cv::Mat frame;
-        //     cap >> frame;
+            int64_t nb_frames = formatContext->streams[videoStreamIndex]->nb_frames;
+            cout << "nb_frames: " << nb_frames << endl;
+            int64_t duration = formatContext->streams[videoStreamIndex]->duration;
+            double durationInSeconds = (double)duration * av_q2d(formatContext->streams[videoStreamIndex]->time_base);
+            cout << "durationInSeconds: " << durationInSeconds << endl;
+            double frameRate = av_q2d(formatContext->streams[videoStreamIndex]->r_frame_rate);
+            cout << "frameRate: " << frameRate << endl;
 
-        //     // Check if we've reached the end of the video
-        //     if (frame.empty()) {
-        //         cap.set(cv::CAP_PROP_POS_FRAMES, 0);
-        //         cap >> frame;
-        //     }
+            // Decode frame
+            ImGui::Begin("Video Player");
+            currentIoFrameNumber = currentIoFrameNumber + frameRate / io.Framerate;
+            if (currentIoFrameNumber > 90)
+            {
+                currentIoFrameNumber -= 90;
+            }
+            if (currentIoFrameNumber < nb_frames)
+            {
+                AVFrame *targetFrame = nullptr;
+                if (!decodeFrame(formatContext, videoStreamIndex, targetFrame, currentIoFrameNumber))
+                {
+                    std::cerr << "Could not decode the target frame.\n";
+                    return -1;
+                }
 
-        //     // Update the OpenGL texture with the new frame
-        //     updateTexture(texture_id, frame);
+                GLuint textureId = createTextureFromFrame(targetFrame);
+                av_frame_free(&targetFrame);
 
-        //     // Render the texture
-        //     // ...
-        // }
-        // if (!frame.empty())
-        // {
-        //     cout << frame.cols << ' ' << frame.rows << endl;
-        //     // Convert the frame to an OpenGL texture
-        //     // glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, frame.cols, frame.rows, 0, GL_BGR, GL_UNSIGNED_BYTE, image);
-
-        //     // Display the texture as an image in ImGui
-        //     ImVec2 texture_size(frame.cols, frame.rows);
-        //     ImTextureID texture = (void*)(intptr_t)texture_id;
-        //     ImGui::Image(texture, texture_size);
-        //     // glBegin(GL_QUADS);
-        //     // glTexCoord2f(0, 1); glVertex2f(-1, -1);
-        //     // glTexCoord2f(1, 1); glVertex2f(1, -1);
-        //     // glTexCoord2f(1, 0); glVertex2f(1, 1);
-        //     // glTexCoord2f(0, 0); glVertex2f(-1, 1);
-        //     // glEnd();
-        //     // glDeleteTextures(1, &texture);
-        // }
-        // ImGui::End();
+                ImVec2 window_size = ImGui::GetWindowSize();
+                ImGui::Image((void *)(intptr_t)textureId, window_size);
+            }
+            ImGui::End();
+        }
 
         // Display video information
         // ImGui::Text("Video resolution: %fx%f", cap.get(cv::CAP_PROP_FRAME_WIDTH), cap.get(cv::CAP_PROP_FRAME_HEIGHT));
