@@ -22,6 +22,17 @@
 
 #include <ImFileBrowser.h>
 
+#include <opencv2/opencv.hpp>
+
+extern "C" {
+#include <libavcodec/avcodec.h>
+#include <libavformat/avformat.h>
+#include <libavutil/imgutils.h>
+#include <libswscale/swscale.h>
+}
+
+using namespace std;
+
 // [Win32] Our example includes a copy of glfw3.lib pre-compiled with VS2010 to maximize ease of testing and compatibility with old VS compilers.
 // To link with VS2010-era libraries, VS2015+ requires linking with legacy_stdio_definitions.lib, which we do using this pragma.
 // Your own project should not be affected, as you are likely to link with a newer binary of GLFW that is adequate for your version of Visual Studio.
@@ -37,6 +48,139 @@
 static void glfw_error_callback(int error, const char *description)
 {
     fprintf(stderr, "GLFW Error %d: %s\n", error, description);
+}
+
+bool decodeThirdFrame(const std::string& inputFilename, AVFrame*& outputFrame) {
+    // Initialize FFmpeg
+    av_register_all();
+
+    // Open the input file
+    AVFormatContext* formatContext = nullptr;
+    if (avformat_open_input(&formatContext, inputFilename.c_str(), nullptr, nullptr) != 0) {
+        std::cerr << "Could not open input file.\n";
+        return false;
+    }
+
+    // Find the first video stream
+    int videoStreamIndex = -1;
+    for (unsigned int i = 0; i < formatContext->nb_streams; ++i) {
+        if (formatContext->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
+            videoStreamIndex = i;
+            break;
+        }
+    }
+
+    if (videoStreamIndex == -1) {
+        std::cerr << "No video stream found.\n";
+        return false;
+    }
+
+    // Get the codec and codec context
+    AVCodecParameters* codecParameters = formatContext->streams[videoStreamIndex]->codecpar;
+    AVCodec* codec = avcodec_find_decoder(codecParameters->codec_id);
+    AVCodecContext* codecContext = avcodec_alloc_context3(codec);
+    avcodec_parameters_to_context(codecContext, codecParameters);
+
+    // Open the codec
+    if (avcodec_open2(codecContext, codec, nullptr) < 0) {
+        std::cerr << "Could not open codec.\n";
+        return false;
+    }
+
+    AVFrame* frame = av_frame_alloc();
+    AVPacket packet;
+    int frameCount = 0;
+
+    // SwsContext *img_convert_ctx = sws_getContext(codecContext->width,
+    //             codecContext->height, codecContext->pix_fmt, codecContext->width,
+    //             codecContext->height, PIX_FMT_RGB24, SWS_BICUBIC, NULL,
+    //             NULL, NULL);
+
+    // Read the frames
+    while (av_read_frame(formatContext, &packet) >= 0) {
+        if (packet.stream_index == videoStreamIndex) {
+            // Decode the video frame
+            if (avcodec_send_packet(codecContext, &packet) < 0) {
+                std::cerr << "Error sending packet for decoding.\n";
+                return false;
+            }
+
+            int ret = avcodec_receive_frame(codecContext, frame);
+            if (ret == 0) {
+                frameCount++;
+
+                // Stop decoding when the third frame is found
+                if (frameCount == 3) {
+                    // outputFrame = frame;
+
+                    // Convert ffmpeg frame timestamp to real frame number.
+					// int64_t numberFrame = (double)((int64_t)pts - 
+					// 	pFormatCtx->streams[videoStreamIndex]->start_time) * 
+					// 	videoBaseTime * videoFramePerSecond; 
+
+					// Get RGBA Frame
+                    AVFrame * rgbaFrame = NULL;
+                    int width  = codecContext->width;
+                    int height = codecContext->height;
+                    int bufferImgSize = avpicture_get_size(AV_PIX_FMT_BGR24, width, height);
+                    rgbaFrame = av_frame_alloc();
+                    uint8_t * buffer = (uint8_t*)av_mallocz(bufferImgSize);
+                    if (rgbaFrame)
+                    {
+                        avpicture_fill((AVPicture*)rgbaFrame, buffer, AV_PIX_FMT_BGR24, width, height);
+                        rgbaFrame->width  = width;
+                        rgbaFrame->height = height;
+                        //rgbaFrame->data[0] = buffer;
+
+                        SwsContext * pImgConvertCtx = sws_getContext(codecContext->width, codecContext->height,
+                            codecContext->pix_fmt,
+                            codecContext->width, codecContext->height,
+                            AV_PIX_FMT_BGR24,
+                            SWS_BICUBIC, NULL, NULL, NULL);
+
+                        sws_scale(pImgConvertCtx, frame->data, frame->linesize,
+                            0, height, rgbaFrame->data, rgbaFrame->linesize);      
+                    }  
+
+                    outputFrame = (AVFrame *)rgbaFrame;
+					break;
+                }
+            }
+        }
+        av_packet_unref(&packet);
+    }
+
+    // Clean up
+    av_packet_unref(&packet);
+    avcodec_free_context(&codecContext);
+    avformat_close_input(&formatContext);
+
+    return frameCount == 3;
+}
+
+GLuint createTextureFromFrame(AVFrame* frame) {
+    GLuint textureId;
+    glGenTextures(1, &textureId);
+    glBindTexture(GL_TEXTURE_2D, textureId);
+
+    // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    // // glPixelStorei(GL_UNPACK_ALIGNMENT, 2);
+
+
+    // GLenum format = frame->format == AV_PIX_FMT_RGB24 ? GL_RGB : GL_RGBA;
+    // glTexImage2D(GL_TEXTURE_2D, 0, format, frame->width, frame->height, 0, format, GL_UNSIGNED_BYTE, frame->data[0]);
+
+            // Set texture parameters
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+            // Upload the frame data to the texture object
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, frame->width, frame->height, 0, GL_RGB, GL_UNSIGNED_BYTE, frame->data[0]);
+
+    return textureId;
 }
 
 // Main code
@@ -131,6 +275,16 @@ int main(int, char **)
     fileDialog.SetTitle("Select the .dcm file to be converted");
     fileDialog.SetTypeFilters({".dcm"});
 
+    // ... Initialize OpenGL context ...
+    AVFrame* thirdFrame = nullptr;
+    if (!decodeThirdFrame("/echocardiography-ui/packages/DICOMTestExe/data/dcm/dicomresults/A2C/mp4s/PWHOR190734217S_12Oct2021_CX03WQDU_3DQ.mp4", thirdFrame)) {
+        std::cerr << "Could not decode the third frame.\n";
+        return -1;
+    }
+
+    GLuint textureId = createTextureFromFrame(thirdFrame);
+    av_frame_free(&thirdFrame);
+
     // Main loop
 #ifdef __EMSCRIPTEN__
     // For an Emscripten build we are disabling file-system access, so let's not attempt to do a fopen() of the imgui.ini file.
@@ -183,12 +337,12 @@ int main(int, char **)
             fileDialog.Display();
             if (fileDialog.HasSelected())
             {
-                std::cout << "Selected filename is " << fileDialog.GetSelected().string() << std::endl;
+                cout << "Selected filename is " << fileDialog.GetSelected().string() << endl;
 
-                std::cout << "Current path is " << std::filesystem::current_path() << std::endl; // (1)
-                std::system("chmod +x /echocardiography-ui/packages/DICOMTestExe/DICOMTestExe");
-                std::string command = "yes | /echocardiography-ui/packages/DICOMTestExe/DICOMTestExe " + fileDialog.GetSelected().string() + " A2C";
-                std::system(command.c_str());
+                cout << "Current path is " << filesystem::current_path() << endl; // (1)
+                system("chmod +x /echocardiography-ui/packages/DICOMTestExe/DICOMTestExe");
+                string command = "yes | /echocardiography-ui/packages/DICOMTestExe/DICOMTestExe " + fileDialog.GetSelected().string() + " A2C";
+                system(command.c_str());
 
                 fileDialog.ClearSelected();
             }
@@ -210,6 +364,83 @@ int main(int, char **)
             ImGui::End();
         }
 
+        ImGui::Begin("Video Player");
+        ImVec2 window_size = ImGui::GetWindowSize();
+        ImGui::Image((void*)(intptr_t)textureId, window_size);
+        ImGui::End();
+        // Get the next frame from the video file
+        // int frame_num = cap.get(cv::CAP_PROP_FRAME_COUNT);
+	    // // cout << "total frame number is: " << frame_num << endl;
+
+        // // Display the frame using OpenGL
+        // ImGui::Begin("Video Player");
+        // if (frame_counter++ % 1 == 0) {
+        //     // cap >> frame;
+        //     // image = cvMat2TexInput(frame);
+
+        //     //     // Display the frame
+        //     // cv::imshow("Video", frame);
+
+        //     // // Wait for a key press (or 30 milliseconds)
+        //     // if (cv::waitKey(30) >= 0) {
+        //     //     break;
+        //     // }
+
+        //     // Read a frame from the video
+        //     cv::Mat frame;
+        //     cap >> frame;
+
+        //     // Check if we've reached the end of the video
+        //     if (frame.empty()) {
+        //         cap.set(cv::CAP_PROP_POS_FRAMES, 0);
+        //         cap >> frame;
+        //     }
+
+        //     // Update the OpenGL texture with the new frame
+        //     updateTexture(texture_id, frame);
+
+        //     // Render the texture
+        //     // ...
+        // }
+        // if (!frame.empty())
+        // {
+        //     cout << frame.cols << ' ' << frame.rows << endl;
+        //     // Convert the frame to an OpenGL texture
+        //     // glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, frame.cols, frame.rows, 0, GL_BGR, GL_UNSIGNED_BYTE, image);
+
+        //     // Display the texture as an image in ImGui
+        //     ImVec2 texture_size(frame.cols, frame.rows);
+        //     ImTextureID texture = (void*)(intptr_t)texture_id;
+        //     ImGui::Image(texture, texture_size);
+        //     // glBegin(GL_QUADS);
+        //     // glTexCoord2f(0, 1); glVertex2f(-1, -1);
+        //     // glTexCoord2f(1, 1); glVertex2f(1, -1);
+        //     // glTexCoord2f(1, 0); glVertex2f(1, 1);
+        //     // glTexCoord2f(0, 0); glVertex2f(-1, 1);
+        //     // glEnd();
+        //     // glDeleteTextures(1, &texture);
+        // }
+        // ImGui::End();
+
+        // Display video information
+        // ImGui::Text("Video resolution: %fx%f", cap.get(cv::CAP_PROP_FRAME_WIDTH), cap.get(cv::CAP_PROP_FRAME_HEIGHT));
+        // ImGui::Text("Current frame: %f / %f", cap.get(cv::CAP_PROP_POS_FRAMES), cap.get(cv::CAP_PROP_FRAME_COUNT));
+
+        // // Display controls
+        // if (ImGui::Button("Play"))
+        // {
+        //     cap.set(cv::CAP_PROP_POS_FRAMES, 0);
+        // }
+        // if (ImGui::Button("Pause"))
+        // {
+        //     // Do nothing
+        // }
+        // if (ImGui::Button("Stop"))
+        // {
+        //     cap.set(cv::CAP_PROP_POS_FRAMES, 0);
+        // }
+        // ImGui::SliderFloat("Speed", nullptr, 0.1f, 2.0f);
+
         // Rendering
         ImGui::Render();
         int display_w, display_h;
@@ -218,6 +449,9 @@ int main(int, char **)
         glClearColor(clear_color.x * clear_color.w, clear_color.y * clear_color.w, clear_color.z * clear_color.w, clear_color.w);
         glClear(GL_COLOR_BUFFER_BIT);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+        // Cleanup the texture
+        // glDeleteTextures(1, &texture_id);
 
         // Update and Render additional Platform Windows
         // (Platform functions may change the current OpenGL context, so we save/restore it to make it easier to paste this code elsewhere.

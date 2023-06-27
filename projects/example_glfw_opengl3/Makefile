@@ -46,9 +46,12 @@ ifeq ($(UNAME_S), Linux) #LINUX
 	ECHO_MESSAGE = "Linux"
 #	LIBS += $(LINUX_GL_LIBS) `pkg-config --static --libs glfw3`
 	LIBS += $(LINUX_GL_LIBS) -L../../packages/glfw/build/src -lglfw3 -lrt -lm -ldl -lpthread
+	LIBS += -L/usr/lib/x86_64-linux-gnu -lopencv_world
+	LIBS += -L/usr/lib/x86_64-linux-gnu -lavformat -lavcodec -lswscale -lavutil
 
 #	CXXFLAGS += `pkg-config --cflags glfw3`
 	CXXFLAGS += -I../../packages/glfw/include
+	CXXFLAGS += -I/usr/include/opencv4
 	CFLAGS = $(CXXFLAGS)
 endif
 
